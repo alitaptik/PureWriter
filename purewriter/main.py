@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self._word_bridge.word.connect(self._editor.highlight_word)
         self._editor.playing_state_changed.connect(self._on_playing_state)
         self._editor.textChanged.connect(self._on_text_changed)
+        self._update_count()
 
         self.resize(self._cfg.get("window_width", 900),
                     self._cfg.get("window_height", 700))
@@ -119,7 +120,7 @@ class MainWindow(QMainWindow):
         if self._cfg.get("preview_visible"):
             self._set_preview_visible(True)
 
-        if not self._cfg.get("api_key"):
+        if not config.resolve_api_key(self._cfg):
             self._prompt_api_key(first_launch=True)
         else:
             self._load_voices()
@@ -148,6 +149,21 @@ class MainWindow(QMainWindow):
         self._voice_combo.setMinimumWidth(200)
         self._voice_combo.currentIndexChanged.connect(self._on_voice_changed)
         toolbar.addWidget(self._voice_combo)
+
+        model_lbl = QLabel("  Model: ")
+        model_lbl.setContentsMargins(8, 0, 4, 0)
+        toolbar.addWidget(model_lbl)
+
+        self._model_combo = QComboBox()
+        self._model_combo.setMinimumWidth(120)
+        for mid, caps in tts.MODELS.items():
+            self._model_combo.addItem(caps["label"], mid)
+        last_model = self._cfg.get("last_model_id", tts.DEFAULT_MODEL)
+        mi = self._model_combo.findData(last_model)
+        if mi >= 0:
+            self._model_combo.setCurrentIndex(mi)
+        self._model_combo.currentIndexChanged.connect(self._on_model_changed)
+        toolbar.addWidget(self._model_combo)
 
         self.addToolBar(toolbar)
 
@@ -199,6 +215,11 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel("Ready")
         self._status_label.setObjectName("playerStatus")
 
+        self._count_label = QLabel("0 words · 0 chars")
+        self._count_label.setObjectName("playerStatus")
+        self._count_label.setToolTip(
+            "Document word/character count and estimated narration time (~150 wpm)")
+
         self._char_label = QLabel("0 chars")
         self._char_label.setObjectName("playerStatus")
         self._char_label.setToolTip("Characters sent to ElevenLabs this session")
@@ -209,6 +230,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._btn_stop)
         layout.addSpacing(8)
         layout.addWidget(self._status_label, stretch=1)
+        layout.addWidget(self._count_label)
+        layout.addSpacing(12)
         layout.addWidget(self._char_label)
 
         return bar
@@ -397,8 +420,24 @@ class MainWindow(QMainWindow):
         config.save(self._cfg)
 
     def _on_text_changed(self):
+        self._update_count()
         if self._preview.isVisible():
             self._preview_timer.start()
+
+    @staticmethod
+    def _fmt_duration(seconds: float) -> str:
+        s = int(round(seconds))
+        if s < 60:
+            return f"{s}s"
+        return f"{s // 60}m {s % 60:02d}s"
+
+    def _update_count(self):
+        text = self._editor.toPlainText()
+        words = len(text.split())
+        chars = len(text)
+        secs = words / 150 * 60  # ~150 wpm narration estimate
+        self._count_label.setText(
+            f"{words:,} words · {chars:,} chars · ~{self._fmt_duration(secs)}")
 
     def _refresh_preview(self):
         if not self._preview.isVisible():
@@ -444,7 +483,7 @@ class MainWindow(QMainWindow):
         self._voice_combo.addItem("Loading voices…")
         self._voice_combo.setEnabled(False)
 
-        self._loader = VoiceLoader(self._cfg["api_key"])
+        self._loader = VoiceLoader(config.resolve_api_key(self._cfg))
         self._loader.loaded.connect(self._on_voices_loaded)
         self._loader.error.connect(self._on_voices_error)
         self._loader.start()
@@ -484,6 +523,20 @@ class MainWindow(QMainWindow):
             return self._voice_combo.itemData(idx) or ""
         return ""
 
+    def _on_model_changed(self):
+        idx = self._model_combo.currentIndex()
+        if idx >= 0:
+            model_id = self._model_combo.itemData(idx)
+            if model_id:
+                self._cfg["last_model_id"] = model_id
+                config.save(self._cfg)
+
+    def _current_model_id(self) -> str:
+        idx = self._model_combo.currentIndex()
+        if idx >= 0:
+            return self._model_combo.itemData(idx) or tts.DEFAULT_MODEL
+        return tts.DEFAULT_MODEL
+
     # ------------------------------------------------------------------
     # TTS
     # ------------------------------------------------------------------
@@ -494,7 +547,7 @@ class MainWindow(QMainWindow):
             self._editor.on_playback_done()
             return
 
-        api_key = self._cfg.get("api_key", "")
+        api_key = config.resolve_api_key(self._cfg)
         voice_id = self._current_voice_id()
 
         if not api_key:
@@ -515,6 +568,7 @@ class MainWindow(QMainWindow):
 
         tts.play(
             text, api_key, voice_id,
+            model_id=self._current_model_id(),
             on_done=self._editor.on_playback_done,
             on_word=self._word_bridge.word.emit,
         )
