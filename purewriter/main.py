@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 import config
+import rtf_io
 import tts
 import voices
 from editor import Editor
@@ -362,6 +363,13 @@ class MainWindow(QMainWindow):
         play_action.triggered.connect(self._editor.toggle_play_current)
         edit_menu.addAction(play_action)
 
+        edit_menu.addSeparator()
+        tag_menu = edit_menu.addMenu("Insert Tag")
+        self._add_action(tag_menu, "Break (0.5 s)", "", lambda: self._insert_tag('<break time="500ms"/>'))
+        self._add_action(tag_menu, "Break (1 s)",   "", lambda: self._insert_tag('<break time="1s"/>'))
+        self._add_action(tag_menu, "Emphasis (wrap selection)", "", lambda: self._wrap_tag('<emphasis level="strong">', "</emphasis>"))
+        self._add_action(tag_menu, "Phoneme (wrap selection)",  "", lambda: self._wrap_tag('<phoneme alphabet="ipa" ph="">', "</phoneme>"))
+
         settings_menu = menubar.addMenu("Settings")
         self._add_action(settings_menu, "Update API Key…", "", self._prompt_api_key)
 
@@ -512,6 +520,25 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
+    # Tag insertion helpers
+    # ------------------------------------------------------------------
+
+    def _insert_tag(self, tag: str):
+        cursor = self._editor.textCursor()
+        cursor.insertText(tag)
+        self._editor.setTextCursor(cursor)
+
+    def _wrap_tag(self, open_tag: str, close_tag: str):
+        cursor = self._editor.textCursor()
+        if cursor.hasSelection():
+            selected = cursor.selectedText()
+            cursor.insertText(f"{open_tag}{selected}{close_tag}")
+        else:
+            cursor.insertText(f"{open_tag}{close_tag}")
+            cursor.movePosition(cursor.MoveOperation.Left, cursor.MoveMode.MoveAnchor, len(close_tag))
+            self._editor.setTextCursor(cursor)
+
+    # ------------------------------------------------------------------
     # File operations
     # ------------------------------------------------------------------
 
@@ -522,13 +549,18 @@ class MainWindow(QMainWindow):
 
     def _open_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open File", "", "Text / Markdown (*.txt *.md);;All Files (*)"
+            self, "Open File", "",
+            "All Supported (*.txt *.md *.rtf);;Text / Markdown (*.txt *.md);;Rich Text (*.rtf);;All Files (*)"
         )
         if path:
             self._load_path(Path(path))
 
     def _load_path(self, path: Path):
-        self._editor.setPlainText(path.read_text(encoding="utf-8"))
+        if path.suffix.lower() == ".rtf":
+            text = rtf_io.load_rtf(path)
+        else:
+            text = path.read_text(encoding="utf-8")
+        self._editor.setPlainText(text)
         self._current_file = path
         self.setWindowTitle(f"PureWriter — {path.name}")
 
@@ -540,7 +572,8 @@ class MainWindow(QMainWindow):
 
     def _save_file_as(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save File", "", "Text (*.txt);;Markdown (*.md);;All Files (*)"
+            self, "Save File", "",
+            "Markdown (*.md);;Plain Text (*.txt);;Rich Text (*.rtf);;All Files (*)"
         )
         if path:
             p = Path(path)
@@ -549,7 +582,10 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"PureWriter — {p.name}")
 
     def _write(self, path: Path):
-        path.write_text(self._editor.toPlainText(), encoding="utf-8")
+        if path.suffix.lower() == ".rtf":
+            rtf_io.save_rtf(path, self._editor.toPlainText())
+        else:
+            path.write_text(self._editor.toPlainText(), encoding="utf-8")
 
     # ------------------------------------------------------------------
     # API key

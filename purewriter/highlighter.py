@@ -110,6 +110,11 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             re.compile(r"\*\*|__|~~|(?<!\w)\*(?!\s)|(?<!\w)_(?!\s)"),
             fmt(color=self._c("#4b5263", "#bbbbbb")),
         ))
+        # SSML / ElevenLabs tags  <break .../>, <emphasis ...>, </emphasis>, etc.
+        self._rules.append((
+            re.compile(r"</?[a-zA-Z][^>\n]*>"),
+            fmt(color=self._c("#56b6c2", "#007a99")),
+        ))
 
     def highlightBlock(self, text: str):
         for pattern, fmt in self._rules:

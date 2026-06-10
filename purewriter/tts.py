@@ -60,8 +60,18 @@ def play(text: str, api_key: str, voice_id: str,
                 f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
                 "/with-timestamps",
                 headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-                json={"text": text, "model_id": "eleven_v3",
-                      "output_format": "mp3_44100_128"},
+                json={
+                    "text": text,
+                    "model_id": "eleven_turbo_v2_5",
+                    "output_format": "mp3_44100_128",
+                    "enable_ssml_parsing": True,
+                    "voice_settings": {
+                        "stability": 0.55,
+                        "similarity_boost": 0.75,
+                        "style": 0.0,
+                        "use_speaker_boost": True,
+                    },
+                },
                 timeout=30,
             )
             resp.raise_for_status()
